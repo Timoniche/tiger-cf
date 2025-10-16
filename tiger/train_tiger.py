@@ -10,9 +10,8 @@ from modeling.dataset import Dataset
 from modeling.loss import IdentityLoss
 from modeling.metric import NDCGSemanticMetric, RecallSemanticMetric
 from modeling.models import TigerModel, CorrectItemsLogitsProcessor
-from modeling.utils import parse_args, create_logger, fix_random_seed
 from modeling.trainer import Trainer
-
+from modeling.utils import parse_args, create_logger, fix_random_seed
 
 LOGGER = create_logger(name=__name__)
 SEED_VALUE = 42
@@ -85,7 +84,8 @@ def main():
             CorrectItemsLogitsProcessor,
             config['dataset']['num_codebooks'],
             config['model']['codebook_size'],
-            config['dataset']['index_json_path']
+            config['dataset']['index_json_path'],
+            config['model']['num_beams']
         )
     ).to(utils.DEVICE)
 
@@ -128,17 +128,20 @@ def main():
         ranking_metrics=ranking_metrics,
         epoch_cnt=config.get('train_epochs_num'),
         step_cnt=config.get('train_steps_num'),
-        best_metric='validation/ndcg@20',
+        best_metric='ndcg@20',
         epochs_threshold=config.get('early_stopping_threshold', 40),
-        valid_step=1024,
-        eval_step=1024,
-        checkpoint=config.get('checkpoint', None),
+        valid_step=256,
+        eval_step=256
     )
 
-    trainer.train()
+    best_checkpoint = trainer.train()
     trainer.save()
 
     LOGGER.debug('Training finished!')
+    LOGGER.debug('Final evaluation is being performed...')
+
+    trainer.load(best_checkpoint)
+    trainer.eval()
 
 
 if __name__ == '__main__':

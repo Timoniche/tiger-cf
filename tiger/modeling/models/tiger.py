@@ -124,7 +124,7 @@ class TigerModel(TorchModel):
             decoder_start_token_id=unified_vocab_size - 3,
             layer_norm_epsilon=self._layer_norm_eps,
             feed_forward_proj=self._activation,
-            tie_word_embeddings=True
+            tie_word_embeddings=False
         )
         self.model = T5ForConditionalGeneration(config=self.config)
         self._init_weights(initializer_range)

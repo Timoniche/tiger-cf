@@ -7,17 +7,14 @@ LOGGER = create_logger(name=__name__)
 
 
 class MetricCallback:
-    def __init__(self, tensorboard_writer, on_step, loss_prefix):
+    def __init__(self, tensorboard_writer, on_step):
         self._tensorboard_writer = tensorboard_writer
         self._on_step = on_step
-        self._loss_prefix = loss_prefix
 
-    def __call__(self, inputs, step_num):
+    def __call__(self, key, value, step_num, prefix):
         if step_num % self._on_step == 0:
             self._tensorboard_writer.add_scalar(
-                'train/{}'.format(self._loss_prefix),
-                inputs[self._loss_prefix],
-                step_num
+                f'{prefix}/{key}', value, step_num
             )
             self._tensorboard_writer.flush()
 
@@ -43,7 +40,8 @@ class InferenceCallback:
         self._pred_prefix = pred_prefix
         self._labels_prefix = labels_prefix
 
-    def __call__(self, inputs, step_num):
+    def __call__(self, step_num):
+        results = {}
         if step_num % self._on_step == 0:
             LOGGER.debug(f'Running {self._step_name} on step {step_num}...')
             running_params = {}
@@ -66,12 +64,8 @@ class InferenceCallback:
                         ))
 
             for label, value in running_params.items():
-                inputs[f'{self._step_name}/{label}'] = np.mean(value)
-                self._tensorboard_writer.add_scalar(
-                    f'{self._step_name}/{label}',
-                    np.mean(value),
-                    step_num
-                )
-            self._tensorboard_writer.flush()
+                results[label] = np.mean(value)
 
             LOGGER.debug(f'Running {self._step_name} on step {step_num} is done!')
+
+        return results

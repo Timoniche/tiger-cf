@@ -26,8 +26,7 @@ class Trainer:
             epochs_threshold=40,
             valid_step=256,
             eval_step=256,
-            checkpoint_dir='../checkpoints',
-            checkpoint=None
+            checkpoint_dir='../checkpoints'
     ):
         self._experiment_name = experiment_name
         self._train_dataloader = train_dataloader
@@ -46,7 +45,7 @@ class Trainer:
 
         tensorboard_writer = TensorboardWriter(self._experiment_name)
 
-        self._metric_callback = MetricCallback(tensorboard_writer=tensorboard_writer, on_step=1, loss_prefix='loss')
+        self._metric_callback = MetricCallback(tensorboard_writer=tensorboard_writer, on_step=1)
 
         self._validation_callback = InferenceCallback(
             tensorboard_writer=tensorboard_writer,
@@ -70,10 +69,6 @@ class Trainer:
             labels_prefix='labels'
         )
 
-        if checkpoint is not None:
-            checkpoint_path = os.path.join(checkpoint_dir, f'{checkpoint}.pth')
-            model.load_state_dict(torch.load(checkpoint_path))
-
     def train(self):
         step_num = 0
         epoch_num = 0
@@ -93,28 +88,41 @@ class Trainer:
             for batch in self._train_dataloader:
                 self._model.train()
 
+                # Move to device
                 for key, values in batch.items():
                     batch[key] = values.to(DEVICE)
 
+                # Forward step
                 batch.update(self._model(batch))
                 loss = self._loss_function(batch)
 
+                # Backward step
                 self._optimizer.zero_grad()
                 loss.backward()
                 self._optimizer.step()
 
-                self._metric_callback(batch, step_num)
-                self._validation_callback(batch, step_num)
-                self._eval_callback(batch, step_num)
+                # Callbacks
+                validation_metrics = self._validation_callback(step_num)
+                evaluation_metrics = self._eval_callback(step_num)
 
+                # Log metrics
+                self._metric_callback(key='loss', value=loss.item(), step_num=step_num, prefix='train')
+                for key, value in validation_metrics.items():
+                    self._metric_callback(key=key, value=value, step_num=step_num, prefix='validation')
+                for key, value in evaluation_metrics.items():
+                    self._metric_callback(key=key, value=value, step_num=step_num, prefix='eval')
+
+                # Update best checkpoint
                 if self._best_metric is None:  # If no best metric is provided last checkpoint is taken
                     best_checkpoint = copy.deepcopy(self._model.state_dict())
                     best_epoch = epoch_num
+                    assert False
                 elif (
                     best_checkpoint is None  # If no best checkpoint exists this one is taken
-                    or self._best_metric in batch and current_metric <= batch[self._best_metric]  # or if metrics improved compared to previous one
+                    or self._best_metric in validation_metrics and current_metric <= validation_metrics[self._best_metric]  # or if metrics improved compared to previous one
                 ):
-                    current_metric = batch[self._best_metric]
+                    print(step_num, validation_metrics[self._best_metric], current_metric, evaluation_metrics[self._best_metric])
+                    current_metric = validation_metrics[self._best_metric]
                     best_checkpoint = copy.deepcopy(self._model.state_dict())
                     best_epoch = epoch_num
 
@@ -124,8 +132,16 @@ class Trainer:
         LOGGER.debug('Training procedure has been finished!')
         return best_checkpoint
 
+    def eval(self):
+        evaluation_metrics = self._eval_callback(0)
+        for key, value in evaluation_metrics.items():
+            print(key, value)
+
     def save(self):
         LOGGER.debug('Saving model...')
         checkpoint_path = f'{self._checkpoint_dir}/{self._experiment_name}_final_state.pth'
         torch.save(self._model.state_dict(), checkpoint_path)
         LOGGER.debug('Saved model as {}'.format(checkpoint_path))
+
+    def load(self, checkpoint):
+        self._model.load_state_dict(checkpoint)

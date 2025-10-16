@@ -113,17 +113,19 @@ def main():
         ranking_metrics=ranking_metrics,
         epoch_cnt=config.get('train_epochs_num'),
         step_cnt=config.get('train_steps_num'),
-        best_metric='validation/ndcg@20',
+        best_metric='ndcg@20',
         epochs_threshold=config.get('early_stopping_threshold', 40),
-        valid_step=1024,
-        eval_step=1024,
-        checkpoint=config.get('checkpoint', None),
+        valid_step=256,
+        eval_step=256
     )
 
-    trainer.train()
+    best_checkpoint = trainer.train()
     trainer.save()
 
     LOGGER.debug('Training finished!')
+
+    trainer.load(best_checkpoint)
+    trainer.eval()
 
 
 if __name__ == '__main__':

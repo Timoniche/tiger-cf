@@ -8,11 +8,12 @@ from ..models import TorchModel
 
 
 class CorrectItemsLogitsProcessor(LogitsProcessor):
-    def __init__(self, num_codebooks, codebook_size, inter_path, visited_items):
+    def __init__(self, num_codebooks, codebook_size, index_path, num_beams, visited_items):
         self.num_codebooks = num_codebooks
         self.codebook_size = codebook_size
+        self.num_beams = num_beams
 
-        with open(inter_path, 'r') as f:
+        with open(index_path, 'r') as f:
             mapping = json.load(f)
 
         semantic_ids = []
@@ -22,12 +23,12 @@ class CorrectItemsLogitsProcessor(LogitsProcessor):
         
         self.index_semantic_ids = torch.tensor(semantic_ids, dtype=torch.long, device=DEVICE)  # (num_items, semantic_ids)
         self.index_semantic_ids += torch.arange(num_codebooks, device=DEVICE)[None] * codebook_size  # (num_items, semantic_ids)
-        
+
         batch_size, _ = visited_items.shape
 
         self.index_semantic_ids = torch.tile(self.index_semantic_ids[None], dims=[batch_size, 1, 1])  # (batch_size, num_items, semantic_ids)
 
-        index = visited_items[..., None].tile(dims=[1, 1, num_codebooks])  # (batch_size, seq_len, semantic_ids)
+        index = visited_items[..., None].tile(dims=[1, 1, num_codebooks])  # (batch_size, num_rated, semantic_ids)
 
         self.index_semantic_ids = torch.scatter(
             input=self.index_semantic_ids,
@@ -38,30 +39,30 @@ class CorrectItemsLogitsProcessor(LogitsProcessor):
     
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         next_sid_codebook_num = (torch.minimum((input_ids[:, -1].max() // self.codebook_size), torch.as_tensor(self.num_codebooks - 1)).item() + 1) % self.num_codebooks
+        a = torch.tile(self.index_semantic_ids[:, None, :, next_sid_codebook_num], dims=[1, self.num_beams, 1])  # (batch_size, num_beams, num_items)
+        a = a.reshape(a.shape[0] * a.shape[1], a.shape[2])  # (batch_size * num_beams, num_items)
 
-        if next_sid_codebook_num == 0:
-            scores[:, self.codebook_size:] = -torch.inf
-        else:
+        if next_sid_codebook_num != 0:
+            b = torch.tile(self.index_semantic_ids[:, None :, :next_sid_codebook_num], dims=[1, self.num_beams, 1, 1])  # (batch_size, num_beams, num_items, sid_len)
+            b = b.reshape(b.shape[0] * b.shape[1], b.shape[2], b.shape[3])  # (batch_size * num_beams, num_items, sid_len)
+
             current_prefixes = input_ids[:, -next_sid_codebook_num:]  # (batch_size * num_beams, sid_len)
             possible_next_items_mask = (
-                torch.eq(
-                    current_prefixes[:, None, :], 
-                    torch.tile(self.index_semantic_ids[:, :, :next_sid_codebook_num], dims=[100, 1, 1])
-                ).long().sum(dim=-1) == next_sid_codebook_num
+                torch.eq(current_prefixes[:, None, :], b).long().sum(dim=-1) == next_sid_codebook_num
             )  # (batch_size * num_beams, num_items)
+            a[~possible_next_items_mask] = (next_sid_codebook_num + 1) * self.codebook_size
 
-            a = torch.tile(self.index_semantic_ids[:, :, next_sid_codebook_num], dims=[100, 1])  # (batch_size * num_beams, num_items)
-            a[~possible_next_items_mask] = 0
-            scores_mask = torch.zeros_like(scores).bool()
-            scores_mask = torch.scatter_add(
-                input=scores_mask,
-                dim=-1,
-                index=a,
-                src=torch.ones_like(a).bool()
-            )
-            scores_mask[:, :next_sid_codebook_num * self.codebook_size] = 0
-            scores_mask[:, (next_sid_codebook_num + 1) * self.codebook_size:] = 0
-            scores[~(scores_mask.bool())] = -torch.inf
+        scores_mask = torch.zeros_like(scores).bool()  # (batch_size * num_beams, num_items)
+        scores_mask = torch.scatter_add(
+            input=scores_mask,
+            dim=-1,
+            index=a,
+            src=torch.ones_like(a).bool()
+        )
+        
+        scores[:, :next_sid_codebook_num * self.codebook_size] = -torch.inf
+        scores[:, (next_sid_codebook_num + 1) * self.codebook_size:] = -torch.inf
+        scores[~(scores_mask.bool())] = -torch.inf
         
         return scores
 
@@ -82,7 +83,7 @@ class TigerModel(TorchModel):
             num_beams=100,
             num_return_sequences=20,
             d_kv=64,
-            layer_norm_eps=1e-9,
+            layer_norm_eps=1e-6,
             activation='relu',
             dropout=0.1,
             initializer_range=0.02,
@@ -123,7 +124,7 @@ class TigerModel(TorchModel):
             decoder_start_token_id=unified_vocab_size - 3,
             layer_norm_epsilon=self._layer_norm_eps,
             feed_forward_proj=self._activation,
-            tie_word_embeddings=False
+            tie_word_embeddings=True
         )
         self.model = T5ForConditionalGeneration(config=self.config)
         self._init_weights(initializer_range)
@@ -151,8 +152,8 @@ class TigerModel(TorchModel):
 
         input_semantic_ids[~attention_mask] = self.config.pad_token_id
         input_semantic_ids = torch.cat([
+            input_semantic_ids,
             self._sem_id_len * self._codebook_size + inputs['hashed_user.ids'][:, None],
-            input_semantic_ids
         ], dim=-1)
         attention_mask = torch.cat([
             attention_mask,
@@ -198,10 +199,11 @@ class TigerModel(TorchModel):
 
             return model_output
         else:
-            visited_items, _ = create_masked_tensor(
-                data=inputs['item.ids'],
-                lengths=inputs['item.length']
-            )  # (batch_size, seq_len)
+            visited_batch, _ = create_masked_tensor(
+                data=inputs['visited.ids'],
+                lengths=inputs['visited.length'],
+            )
+
             output = self.model.generate(
                 input_ids=input_semantic_ids,
                 attention_mask=attention_mask,
@@ -213,7 +215,7 @@ class TigerModel(TorchModel):
                 pad_token_id=self.config.pad_token_id,
                 do_sample=False,
                 early_stopping=False,
-                logits_processor=[self.logits_processor(visited_items=visited_items)] if self.logits_processor is not None else [],
+                logits_processor=[self.logits_processor(visited_items=visited_batch)] if self.logits_processor is not None else [],
             )
             return {
                 'predictions': output[:, 1:].reshape(-1, self._num_return_sequences, self._sem_id_len)

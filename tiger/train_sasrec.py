@@ -75,6 +75,12 @@ def main():
         initializer_range=config['model']['initializer_range']
     ).to(utils.DEVICE)
 
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    LOGGER.debug(f'Overall parameters: {total_params:,}')
+    LOGGER.debug(f'Trainable parameters: {trainable_params:,}')
+
     loss_function = BCELoss(
         positive_prefix='positive_scores',
         negative_prefix='negative_scores',
@@ -110,8 +116,8 @@ def main():
         step_cnt=config.get('train_steps_num'),
         best_metric='validation/ndcg@20',
         epochs_threshold=config.get('early_stopping_threshold', 40),
-        valid_step=256,
-        eval_step=256,
+        valid_step=1024,
+        eval_step=1024,
         checkpoint=config.get('checkpoint', None),
     )
 

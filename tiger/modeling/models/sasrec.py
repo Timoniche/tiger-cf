@@ -106,6 +106,15 @@ class SasRecModel(TorchModel):
                 self._item_embeddings.weight
             )  # (batch_size, num_items)
 
+            visited_batch, _ = create_masked_tensor(
+                data=inputs['visited.ids'],
+                lengths=inputs['visited.length'],
+            )
+            candidate_scores = candidate_scores.scatter_add(
+                dim=-1,
+                index=visited_batch,
+                src=torch.ones_like(visited_batch) * (-torch.inf)
+            )
             _, indices = torch.topk(candidate_scores, k=self._topk_k, dim=-1, largest=True)  # (batch_size, topk_k)
 
             return {'predictions': indices}

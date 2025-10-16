@@ -46,28 +46,28 @@ class Trainer:
 
         tensorboard_writer = TensorboardWriter(self._experiment_name)
 
-        self._metric_callback = MetricCallback(tensorboard_writer=tensorboard_writer, on_step=1, loss_prefix="loss")
+        self._metric_callback = MetricCallback(tensorboard_writer=tensorboard_writer, on_step=1, loss_prefix='loss')
 
         self._validation_callback = InferenceCallback(
             tensorboard_writer=tensorboard_writer,
-            step_name="validation",
+            step_name='validation',
             model=model,
             dataloader=validation_dataloader,
             on_step=valid_step,
             metrics=ranking_metrics,
-            pred_prefix="predictions",
-            labels_prefix="labels"
+            pred_prefix='predictions',
+            labels_prefix='labels'
         )
 
         self._eval_callback = InferenceCallback(
             tensorboard_writer=tensorboard_writer,
-            step_name="eval",
+            step_name='eval',
             model=model,
             dataloader=eval_dataloader,
             on_step=eval_step,
             metrics=ranking_metrics,
-            pred_prefix="predictions",
-            labels_prefix="labels"
+            pred_prefix='predictions',
+            labels_prefix='labels'
         )
 
         if checkpoint is not None:
@@ -83,8 +83,7 @@ class Trainer:
 
         LOGGER.debug('Start training...')
 
-        while (self._epoch_cnt is None or epoch_num < self._epoch_cnt) and (
-                self._step_cnt is None or step_num < self._step_cnt):
+        while (step_num < 200_000):
             if best_epoch + self._epochs_threshold < epoch_num:
                 LOGGER.debug(
                     'There is no progress during {} epochs. Finish training'.format(self._epochs_threshold))

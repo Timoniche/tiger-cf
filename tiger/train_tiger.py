@@ -1,4 +1,5 @@
 import json
+from functools import partial
 
 import torch
 from torch.utils.data import DataLoader
@@ -8,7 +9,7 @@ from modeling.dataloader import BatchProcessor
 from modeling.dataset import Dataset
 from modeling.loss import IdentityLoss
 from modeling.metric import NDCGSemanticMetric, RecallSemanticMetric
-from modeling.models import TigerModel
+from modeling.models import TigerModel, CorrectItemsLogitsProcessor
 from modeling.utils import parse_args, create_logger, fix_random_seed
 from modeling.trainer import Trainer
 
@@ -80,7 +81,19 @@ def main():
         dropout=config['model']['dropout'],
         layer_norm_eps=config['model']['layer_norm_eps'],
         initializer_range=config['model']['initializer_range'],
+        logits_processor=partial(
+            CorrectItemsLogitsProcessor,
+            config['dataset']['num_codebooks'],
+            config['model']['codebook_size'],
+            config['dataset']['index_json_path']
+        )
     ).to(utils.DEVICE)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    LOGGER.debug(f'Overall parameters: {total_params:,}')
+    LOGGER.debug(f'Trainable parameters: {trainable_params:,}')
 
     loss_function = IdentityLoss(
         predictions_prefix='loss',
@@ -117,8 +130,8 @@ def main():
         step_cnt=config.get('train_steps_num'),
         best_metric='validation/ndcg@20',
         epochs_threshold=config.get('early_stopping_threshold', 40),
-        valid_step=256,
-        eval_step=256,
+        valid_step=1024,
+        eval_step=1024,
         checkpoint=config.get('checkpoint', None),
     )
 

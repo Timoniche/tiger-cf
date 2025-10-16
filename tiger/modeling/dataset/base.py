@@ -37,42 +37,37 @@ class Dataset:
 
             assert len(item_ids) >= 5, f'Core-5 dataset is used, user {user_id} has only {len(item_ids)} items'
 
-            # sequence = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] (9 - valid, 10 - test)
+            # sequence = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] (leave one out scheme, 8 - train, 9 - valid, 10 - test)
             if is_extended:
+                # sample = [1, 2]
+                # sample = [1, 2, 3]
+                # sample = [1, 2, 3, 4]
                 # sample = [1, 2, 3, 4, 5]
                 # sample = [1, 2, 3, 4, 5, 6]
                 # sample = [1, 2, 3, 4, 5, 6, 7]
                 # sample = [1, 2, 3, 4, 5, 6, 7, 8]
-                for prefix_length in range(5 - 2 + 1, len(item_ids) - 2 + 1):
+                for prefix_length in range(2, len(item_ids) - 2 + 1):
                     train_dataset.append({
                         'user.ids': [user_id],
-                        'user.length': 1,
-                        'item.ids': item_ids[:prefix_length][-max_sequence_length:],
-                        'item.length': len(item_ids[:prefix_length][-max_sequence_length:]),
+                        'item.ids': item_ids[:prefix_length],
                     })
             else:
                 # sample = [1, 2, 3, 4, 5, 6, 7, 8]
                 train_dataset.append({
                     'user.ids': [user_id],
-                    'user.length': 1,
-                    'item.ids': item_ids[:-2][-max_sequence_length:],
-                    'item.length': len(item_ids[:-2][-max_sequence_length:])
+                    'item.ids': item_ids[:-2],
                 })
 
             # sample = [1, 2, 3, 4, 5, 6, 7, 8, 9]
             validation_dataset.append({
                 'user.ids': [user_id],
-                'user.length': 1,
-                'item.ids': item_ids[:-1][-max_sequence_length:],
-                'item.length': len(item_ids[:-1][-max_sequence_length:])
+                'item.ids': item_ids[:-1],
             })
 
             # sample = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
             test_dataset.append({
                 'user.ids': [user_id],
-                'user.length': 1,
-                'item.ids': item_ids[-max_sequence_length:],
-                'item.length': len(item_ids[-max_sequence_length:])
+                'item.ids': item_ids,
             })
 
         LOGGER.info(f'Train dataset size: {len(train_dataset)}')
@@ -80,9 +75,9 @@ class Dataset:
         LOGGER.info(f'Test dataset size: {len(test_dataset)}')
         LOGGER.info(f'Max item id: {max_item_id}')
 
-        train_sampler = TrainSampler(train_dataset, sampler_type)
-        validation_sampler = EvalSampler(validation_dataset)
-        test_sampler = EvalSampler(test_dataset)
+        train_sampler = TrainSampler(train_dataset, sampler_type, max_sequence_length=max_sequence_length)
+        validation_sampler = EvalSampler(validation_dataset, max_sequence_length=max_sequence_length)
+        test_sampler = EvalSampler(test_dataset, max_sequence_length=max_sequence_length)
 
         return cls(
             train_sampler=train_sampler,

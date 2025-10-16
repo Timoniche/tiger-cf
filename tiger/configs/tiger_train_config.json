@@ -2,14 +2,14 @@
   "experiment_name": "tiger_beauty",
   "dataset": {
     "inter_json_path": "../data/Beauty/inter.json",
-    "index_json_path": "../data/Beauty/index_rqkmeans.json",
+    "index_json_path": "../data/Beauty/index_rqvae.json",
     "num_codebooks": 4,
     "max_sequence_length": 20,
     "sampler_type": "tiger"
   },
   "dataloader": {
     "train_batch_size": 256,
-    "validation_batch_size": 1024
+    "validation_batch_size": 256
   },
   "model": {
     "embedding_dim": 128,

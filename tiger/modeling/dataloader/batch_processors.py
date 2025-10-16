@@ -11,7 +11,7 @@ class BatchProcessor:
         self._user_ids_count = user_ids_count
 
         if semantic_ids is not None:
-            self._prefixes = ['item', 'labels', 'positive', 'negative']
+            self._prefixes = ['item', 'labels']
             self._mapping_tensor = torch.tensor(semantic_ids, dtype=torch.long)
 
     @classmethod

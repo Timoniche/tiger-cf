@@ -63,7 +63,7 @@ pip install transformers  # (==4.50.3)
 
 ## Usage
 
-**Important:** Execute all commands from the tiger/tiger directory (not from the project root).
+**Important:** Execute all commands from the `tiger/tiger` directory (not from the project root).
 
 **Training SASRec:**
 ```bash
@@ -112,7 +112,7 @@ Also, in our implementation there are some other differences.
 We plan to investigate these implementation differences more thoroughly and address the following:
 
 - Add a coverage metric to the evaluation protocol
-- Add [LETTER]((http://arxiv.org/abs/2405.07314)) and [PLUM](https://arxiv.org/pdf/2510.07784v1) implementations.
+- Add [LETTER](http://arxiv.org/abs/2405.07314) and [PLUM](https://arxiv.org/pdf/2510.07784v1) implementations.
 - Add more datasets (e.g.: Yelp, Instruments, Books)
 - Fine-tune hyperparameters to achieve the best performance metrics
 - Add a decoder-only variant of the TIGER model

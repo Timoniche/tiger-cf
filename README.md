@@ -81,7 +81,7 @@ Because there is no official TIGER reference implementation, we compare on Beaut
 
 ## Results
 
-Following the original setup, we report NDCG (N) and Hit Rate (H) at cutoffs 5 and 10. Additionally, we compute @20 variants.
+Following the original setup, we report NDCG (N) and Hit Rate (H) with @5, @10, and additionaly @20 cutoffs.
 
 
 | Model  | Dataset | N@5         | N@10        | N@20        | H@5         | H@10        | N@20        |

@@ -31,5 +31,5 @@
   "optimizer": {
     "lr": 0.0003
   },
-  "train_epochs_num": 1
+  "train_epochs_num": 20
 }

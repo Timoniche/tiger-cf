@@ -8,7 +8,10 @@ from modeling import utils
 from modeling.dataloader import BatchProcessor
 from modeling.dataset import Dataset
 from modeling.loss import IdentityLoss
-from modeling.metric import NDCGSemanticMetric, RecallSemanticMetric
+from modeling.metric import (
+    NDCGSemanticMetric,
+    RecallSemanticMetric,
+)
 from modeling.models import TigerModel, CorrectItemsLogitsProcessor
 from modeling.trainer import Trainer
 from modeling.utils import parse_args, create_logger, fix_random_seed
@@ -32,6 +35,10 @@ def main():
     )
 
     train_sampler, validation_sampler, test_sampler = dataset.get_samplers()
+    item_freqs_tensor = torch.tensor(dataset.item_frequencies, dtype=torch.long)
+    cold_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 10)
+    warm_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 100)
+    hot_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 1000)
 
     num_codebooks = config['dataset']['num_codebooks']
     user_ids_count = config['model']['user_ids_count']
@@ -112,7 +119,28 @@ def main():
         'ndcg@20': NDCGSemanticMetric(20, codebook_size, num_codebooks),
         'recall@5': RecallSemanticMetric(5, codebook_size, num_codebooks),
         'recall@10': RecallSemanticMetric(10, codebook_size, num_codebooks),
-        'recall@20': RecallSemanticMetric(20, codebook_size, num_codebooks)
+        'recall@20': RecallSemanticMetric(20, codebook_size, num_codebooks),
+        # Frequency-bucketed metrics via allowed_item_mask
+        'ndcg@5_cold': NDCGSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+        'ndcg@10_cold': NDCGSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+        'ndcg@20_cold': NDCGSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+        'recall@5_cold': RecallSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+        'recall@10_cold': RecallSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+        'recall@20_cold': RecallSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=cold_mask),
+
+        'ndcg@5_warm': NDCGSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+        'ndcg@10_warm': NDCGSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+        'ndcg@20_warm': NDCGSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+        'recall@5_warm': RecallSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+        'recall@10_warm': RecallSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+        'recall@20_warm': RecallSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=warm_mask),
+
+        'ndcg@5_hot': NDCGSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
+        'ndcg@10_hot': NDCGSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
+        'ndcg@20_hot': NDCGSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
+        'recall@5_hot': RecallSemanticMetric(5, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
+        'recall@10_hot': RecallSemanticMetric(10, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
+        'recall@20_hot': RecallSemanticMetric(20, codebook_size, num_codebooks, allowed_item_mask=hot_mask),
     }
 
     LOGGER.debug('Everything is ready for training process!')

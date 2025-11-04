@@ -44,13 +44,15 @@ class NDCGSemanticMetric:
             keep_mask = self._allowed_item_mask.to(raw_labels.device)[raw_labels]
             if keep_mask.sum().item() == 0:
                 return []
+            # Reshape semantic labels to (batch_size, sid_length) before masking by batch
+            labels2d = inputs[f'semantic_{labels_prefix}.ids'].long().reshape(batch_size, sid_length)
             predictions = predictions[keep_mask]
-            labels = inputs[f'semantic_{labels_prefix}.ids'].long()[keep_mask]
+            labels = labels2d[keep_mask]
             batch_size = keep_mask.sum().item()
         else:
-            labels = inputs[f'semantic_{labels_prefix}.ids'].long()
+            labels = inputs[f'semantic_{labels_prefix}.ids'].long().reshape(batch_size, sid_length)
 
-        labels = labels.reshape(batch_size, 1, sid_length)
+        labels = labels[:, None, :]
         offsetted_labels = labels + self._codebook_size * torch.arange(self._num_codebooks, device=labels.device)[None, None, :]
 
         hits = (torch.eq(predictions[:, :self._k, :], offsetted_labels).sum(dim=-1) == sid_length).float()  # (batch_size, top_k_indices)
@@ -103,13 +105,15 @@ class RecallSemanticMetric:
             keep_mask = self._allowed_item_mask.to(raw_labels.device)[raw_labels]
             if keep_mask.sum().item() == 0:
                 return []
+            # Reshape semantic labels to (batch_size, sid_length) before masking by batch
+            labels2d = inputs[f'semantic_{labels_prefix}.ids'].long().reshape(batch_size, sid_length)
             predictions = predictions[keep_mask]
-            labels = inputs[f'semantic_{labels_prefix}.ids'].long()[keep_mask]
+            labels = labels2d[keep_mask]
             batch_size = keep_mask.sum().item()
         else:
-            labels = inputs[f'semantic_{labels_prefix}.ids'].long()
+            labels = inputs[f'semantic_{labels_prefix}.ids'].long().reshape(batch_size, sid_length)
 
-        labels = labels.reshape(batch_size, 1, sid_length)
+        labels = labels[:, None, :]
         offsetted_labels = labels + self._codebook_size * torch.arange(self._num_codebooks, device=labels.device)[None, None, :]
 
         hits = (torch.eq(predictions[:, :self._k, :], offsetted_labels).sum(dim=-1) == sid_length).float()  # (batch_size, top_k_indices)

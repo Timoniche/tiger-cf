@@ -1,3 +1,14 @@
 .idea
 .DS_Store
 .DS_Store
+**/*.cpython-311..pyc
+vk_lsvd/metadata
+**/*.pth
+**/*.pkl
+**/.ipynb_checkpoints
+data/Beauty_legacy_datasphere/**
+tensorboard_logs_legacy/**
+tensorboard_logs/**
+tiger/modeling/dataset/__pycache__/**
+vk_lsvd/subsamples
+**/*.pyc

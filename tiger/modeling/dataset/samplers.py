@@ -25,6 +25,7 @@ class TrainSampler:
         }
 
     def _last_item_transform(self, sample):
+        # последние 20 элементов
         item_sequence = sample['item.ids'][-self._max_sequence_length:][:-1]
         last_item = sample['item.ids'][-self._max_sequence_length:][-1]
         return {

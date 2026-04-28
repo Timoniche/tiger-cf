@@ -26,6 +26,7 @@ cold_mask = ((item_freqs >= 5) & (item_freqs <= 10))
 warm_mask = ((item_freqs >= 5) & (item_freqs <= 20))
 hot_mask = ((item_freqs >= 5))
 
+# num_items=21928, cold=7548, warm=11930, hot=21088
 print(f'num_items={num_items}, cold={int(cold_mask.sum())}, warm={int(warm_mask.sum())}, hot={int(hot_mask.sum())}')
 
 

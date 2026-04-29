@@ -1,0 +1,11 @@
+Привет!
+
+Ты уже в task1.txt добавлял стадию контрастного обучения
+
+Давай теперь отдельным джупитер ноутбуком сделаем стадию контрастного обучения с logQ коррекцией по аналогии с тем, как это сделано для Amazon датасета
+положим рядом с /Users/timoniche/IdeaProjects/tiger-cf/tiger/cf_finetune_vk.ipynb и назовем /Users/timoniche/IdeaProjects/tiger-cf/tiger/cf_finetune_log_q_vk.ipynb
+
+Логика, которую нужно воспроизвести для вк датасета можно посмотреть тут def nt_xent_loss_with_logq_neg_only(z1, z2, a_ids, p_ids, logq, tau=0.07)
+tiger/cf_finetune.ipynb
+
+Но нужно понимать, что нам щас еще не хватает построенного item_frequencies.txt, ты его не добавлял в tiger/cf_dataset_builder_vk.ipynb

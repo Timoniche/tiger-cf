@@ -12,3 +12,5 @@ tensorboard_logs/**
 tiger/modeling/dataset/__pycache__/**
 vk_lsvd/subsamples
 **/*.pyc
+yambda/embeddings.parquet
+yambda/flat/50m/likes.parquet

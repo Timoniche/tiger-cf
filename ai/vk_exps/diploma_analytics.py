@@ -13,7 +13,7 @@ import argparse
 import glob
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -50,21 +50,25 @@ class RunResult:
     dataset: str
     variant: str
     run_dir: str
-    # metric -> {segment -> max value}
-    metrics: dict[str, dict[str, float]]
+    # raw tag (e.g. "ndcg@20_cold") -> list of (step, value)
+    points: dict[str, list[tuple[int, float]]]
+    # metric -> {segment -> max value within truncation window}, filled later
+    metrics: dict[str, dict[str, float]] = field(default_factory=dict)
+    max_step: int = 0
+    cutoff_step: int = 0
 
 
-def parse_event_file(path: str) -> dict[str, float]:
+def parse_event_file(path: str) -> dict[str, list[tuple[int, float]]]:
     ea = event_accumulator.EventAccumulator(path, size_guidance={"scalars": 0})
     ea.Reload()
-    out: dict[str, float] = {}
+    out: dict[str, list[tuple[int, float]]] = {}
     for tag in ea.Tags().get("scalars", []):
         if not tag.startswith("eval/"):
             continue
         pts = ea.Scalars(tag)
         if not pts:
             continue
-        out[tag[len("eval/"):]] = max(p.value for p in pts)
+        out[tag[len("eval/"):]] = [(int(p.step), float(p.value)) for p in pts]
     return out
 
 
@@ -72,27 +76,48 @@ def parse_run(dataset: str, run_dir: str) -> RunResult:
     event_files = sorted(
         glob.glob(os.path.join(run_dir, "**", "events.out.tfevents.*"), recursive=True)
     )
-    merged: dict[str, float] = {}
+    merged: dict[str, list[tuple[int, float]]] = {}
     for ef in event_files:
-        for k, v in parse_event_file(ef).items():
-            if k not in merged or v > merged[k]:
-                merged[k] = v
+        for k, pts in parse_event_file(ef).items():
+            merged.setdefault(k, []).extend(pts)
 
-    metrics: dict[str, dict[str, float]] = {m: {} for m in METRICS}
-    for raw_tag, value in merged.items():
-        m = re.match(r"^(ndcg@\d+|recall@\d+)(?:_(cold|warm|hot))?$", raw_tag)
-        if not m:
-            continue
-        metric, seg = m.group(1), m.group(2) or "overall"
-        if metric in metrics:
-            metrics[metric][seg] = value
-
+    max_step = max((s for pts in merged.values() for s, _ in pts), default=0)
     return RunResult(
         dataset=dataset,
         variant=variant_from_dirname(os.path.basename(run_dir)),
         run_dir=run_dir,
-        metrics=metrics,
+        points=merged,
+        max_step=max_step,
     )
+
+
+def fill_metrics(runs: list[RunResult]) -> None:
+    """Equalize per dataset to the min training length, then take max per metric."""
+    by_dataset: dict[str, list[RunResult]] = {}
+    for r in runs:
+        by_dataset.setdefault(r.dataset, []).append(r)
+
+    for dataset, rs in by_dataset.items():
+        cutoff = min(r.max_step for r in rs)
+        print(
+            f"[truncate] {dataset}: per-run max_step="
+            + ", ".join(f"{r.variant}={r.max_step}" for r in rs)
+            + f" -> cutoff={cutoff}"
+        )
+        for r in rs:
+            r.cutoff_step = cutoff
+            metrics: dict[str, dict[str, float]] = {m: {} for m in METRICS}
+            for raw_tag, pts in r.points.items():
+                m = re.match(r"^(ndcg@\d+|recall@\d+)(?:_(cold|warm|hot))?$", raw_tag)
+                if not m:
+                    continue
+                metric, seg = m.group(1), m.group(2) or "overall"
+                if metric not in metrics:
+                    continue
+                vals = [v for s, v in pts if s <= cutoff]
+                if vals:
+                    metrics[metric][seg] = max(vals)
+            r.metrics = metrics
 
 
 def collect_runs() -> list[RunResult]:
@@ -106,6 +131,7 @@ def collect_runs() -> list[RunResult]:
             if not os.path.isdir(run_dir):
                 continue
             runs.append(parse_run(dataset, run_dir))
+    fill_metrics(runs)
     return runs
 
 
@@ -122,11 +148,11 @@ def build_summary_frame(runs: list[RunResult], segment: str = "overall") -> pd.D
     return df.sort_values(["dataset", "variant"]).reset_index(drop=True)
 
 
-def build_cold_uplift_frame(runs: list[RunResult]) -> pd.DataFrame:
-    """Cold-segment uplift over baseline, in absolute and % terms."""
-    cold_df = build_summary_frame(runs, segment="cold")
+def build_baseline_uplift_frame(runs: list[RunResult], segment: str) -> pd.DataFrame:
+    """Per-segment uplift over baseline for every non-baseline variant."""
+    seg_df = build_summary_frame(runs, segment=segment)
     rows = []
-    for dataset, sub in cold_df.groupby("dataset", observed=True):
+    for dataset, sub in seg_df.groupby("dataset", observed=True):
         base = sub[sub["variant"] == "baseline"]
         if base.empty:
             continue
@@ -152,22 +178,70 @@ def build_cold_uplift_frame(runs: list[RunResult]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_pair_uplift_frame(
+    runs: list[RunResult], segment: str, base: str, target: str
+) -> pd.DataFrame:
+    """Per-dataset uplift of `target` variant over `base` variant for `segment`."""
+    seg_df = build_summary_frame(runs, segment=segment)
+    rows = []
+    for dataset, sub in seg_df.groupby("dataset", observed=True):
+        base_row = sub[sub["variant"] == base]
+        tgt_row = sub[sub["variant"] == target]
+        if base_row.empty or tgt_row.empty:
+            continue
+        b, t = base_row.iloc[0], tgt_row.iloc[0]
+        for m in METRICS:
+            bv, tv = b[m], t[m]
+            if pd.isna(bv) or pd.isna(tv):
+                continue
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "metric": m,
+                    "base": bv,
+                    "value": tv,
+                    "abs_uplift": tv - bv,
+                    "rel_uplift_%": (tv - bv) / bv * 100.0 if bv else np.nan,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def fmt_summary_block(df: pd.DataFrame, segment_label: str) -> str:
     out = [f"### {segment_label}\n"]
     for dataset, sub in df.groupby("dataset", observed=True):
+        sub = sub.reset_index(drop=True)
         out.append(f"**{dataset}**")
         view = sub[["variant", *METRICS]].copy()
         for m in METRICS:
-            view[m] = view[m].map(lambda v: f"{v:.4g}" if pd.notna(v) else "-")
+            vals = sub[m].to_numpy(dtype=float)
+            ranked = sorted(
+                [(i, v) for i, v in enumerate(vals) if not np.isnan(v)],
+                key=lambda x: -x[1],
+            )
+            best_idx = ranked[0][0] if len(ranked) >= 1 else None
+            second_idx = ranked[1][0] if len(ranked) >= 2 else None
+            cells = []
+            for i, v in enumerate(vals):
+                if pd.isna(v):
+                    cells.append("-")
+                elif i == best_idx:
+                    cells.append(f"**{v:.4g}**")
+                elif i == second_idx:
+                    cells.append(f"<u>{v:.4g}</u>")
+                else:
+                    cells.append(f"{v:.4g}")
+            view[m] = cells
         out.append(tabulate(view, headers="keys", tablefmt="github", showindex=False))
         out.append("")
     return "\n".join(out)
 
 
-def fmt_cold_uplift(df: pd.DataFrame) -> str:
+def fmt_baseline_uplift(df: pd.DataFrame, segment_label: str) -> str:
+    title = f"### Improvements over baseline — {segment_label}\n"
     if df.empty:
-        return "_no cold-segment data_"
-    out = ["### Cold-item improvements over baseline\n"]
+        return title + "_no data_\n"
+    out = [title]
     for dataset, sub in df.groupby("dataset", observed=True):
         out.append(f"**{dataset}**")
         view = sub.copy()
@@ -185,6 +259,58 @@ def fmt_cold_uplift(df: pd.DataFrame) -> str:
         )
         out.append("")
     return "\n".join(out)
+
+
+def fmt_pair_uplift(df: pd.DataFrame, base: str, target: str, segment_label: str) -> str:
+    title = f"### {target} vs {base} — {segment_label}\n"
+    if df.empty:
+        return title + "_no data_\n"
+    out = [title]
+    for dataset, sub in df.groupby("dataset", observed=True):
+        out.append(f"**{dataset}**")
+        view = sub.copy()
+        view["base"] = view["base"].map(lambda v: f"{v:.4g}")
+        view["value"] = view["value"].map(lambda v: f"{v:.4g}")
+        view["abs_uplift"] = view["abs_uplift"].map(lambda v: f"{v:+.4g}")
+        view["rel_uplift_%"] = view["rel_uplift_%"].map(lambda v: f"{v:+.2f}%")
+        view = view.rename(columns={"base": base, "value": target})
+        out.append(
+            tabulate(
+                view[["metric", base, target, "abs_uplift", "rel_uplift_%"]],
+                headers="keys",
+                tablefmt="github",
+                showindex=False,
+            )
+        )
+        out.append("")
+    return "\n".join(out)
+
+
+def plot_pair_uplift(
+    df: pd.DataFrame, base: str, target: str, segment_label: str, out_path: str
+) -> None:
+    if df.empty:
+        return
+    datasets = sorted(df["dataset"].unique(), key=lambda d: list(DATASETS).index(d))
+    fig, axes = plt.subplots(1, len(datasets), figsize=(5.2 * len(datasets), 4.5), sharey=False)
+    if len(datasets) == 1:
+        axes = [axes]
+    x = np.arange(len(METRICS))
+    for ax, ds in zip(axes, datasets):
+        sub = df[df["dataset"] == ds].set_index("metric").reindex(METRICS)
+        vals = sub["rel_uplift_%"].to_numpy(dtype=float)
+        colors = ["#2ca02c" if v >= 0 else "#d62728" for v in vals]
+        ax.bar(x, vals, 0.6, color=colors)
+        ax.axhline(0, color="black", linewidth=0.8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(METRICS, rotation=30, ha="right")
+        ax.set_ylabel(f"Relative uplift of {target} over {base}, %")
+        ax.set_title(f"{ds} — {segment_label}")
+        ax.grid(axis="y", linestyle=":", alpha=0.5)
+    fig.suptitle(f"{target} vs {base} — {segment_label}", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_summary(df: pd.DataFrame, segment_label: str, out_path: str) -> None:
@@ -209,13 +335,16 @@ def plot_summary(df: pd.DataFrame, segment_label: str, out_path: str) -> None:
         ax.set_title(f"{ds} — {segment_label}")
         ax.grid(axis="y", linestyle=":", alpha=0.5)
         ax.legend(fontsize=8)
-    fig.suptitle(f"Eval metrics ({segment_label}) — max over training", fontsize=12)
+    fig.suptitle(
+        f"Eval metrics ({segment_label}) — max within common min_step window",
+        fontsize=12,
+    )
     fig.tight_layout()
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_cold_uplift(df: pd.DataFrame, out_path: str) -> None:
+def plot_baseline_uplift(df: pd.DataFrame, segment_label: str, out_path: str) -> None:
     if df.empty:
         return
     datasets = sorted(df["dataset"].unique(), key=lambda d: list(DATASETS).index(d))
@@ -236,10 +365,10 @@ def plot_cold_uplift(df: pd.DataFrame, out_path: str) -> None:
         ax.set_xticks(x)
         ax.set_xticklabels(METRICS, rotation=30, ha="right")
         ax.set_ylabel("Relative uplift over baseline, %")
-        ax.set_title(f"{ds} — cold items")
+        ax.set_title(f"{ds} — {segment_label}")
         ax.grid(axis="y", linestyle=":", alpha=0.5)
         ax.legend(fontsize=8)
-    fig.suptitle("Cold-item relative uplift vs baseline", fontsize=12)
+    fig.suptitle(f"Relative uplift vs baseline — {segment_label}", fontsize=12)
     fig.tight_layout()
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -261,41 +390,66 @@ def main() -> None:
 
     print(f"Found {len(runs)} runs:")
     for r in runs:
-        print(f"  - {r.dataset:9s} | {r.variant:12s} | {os.path.basename(r.run_dir)}")
+        print(
+            f"  - {r.dataset:9s} | {r.variant:12s} | "
+            f"max_step={r.max_step:>6d} cutoff={r.cutoff_step:>6d} | "
+            f"{os.path.basename(r.run_dir)}"
+        )
     print()
 
-    overall = build_summary_frame(runs, "overall")
-    cold = build_summary_frame(runs, "cold")
-    warm = build_summary_frame(runs, "warm")
-    hot = build_summary_frame(runs, "hot")
-    cold_uplift = build_cold_uplift_frame(runs)
+    seg_labels = [
+        ("overall", "Overall"),
+        ("cold", "Cold items"),
+        ("warm", "Warm items"),
+        ("hot", "Hot items"),
+    ]
 
-    overall.to_csv(os.path.join(args.out_dir, "summary_overall.csv"), index=False)
-    cold.to_csv(os.path.join(args.out_dir, "summary_cold.csv"), index=False)
-    warm.to_csv(os.path.join(args.out_dir, "summary_warm.csv"), index=False)
-    hot.to_csv(os.path.join(args.out_dir, "summary_hot.csv"), index=False)
-    cold_uplift.to_csv(os.path.join(args.out_dir, "cold_uplift_vs_baseline.csv"), index=False)
+    summaries = {seg: build_summary_frame(runs, seg) for seg in SEGMENTS}
+    baseline_uplift = {seg: build_baseline_uplift_frame(runs, seg) for seg in SEGMENTS}
+    logq_vs_tuned = {
+        seg: build_pair_uplift_frame(runs, seg, base="tuned, 0.07", target="logQ")
+        for seg in SEGMENTS
+    }
 
-    print(fmt_summary_block(overall, "Overall"))
-    print(fmt_summary_block(cold, "Cold items"))
-    print(fmt_summary_block(warm, "Warm items"))
-    print(fmt_summary_block(hot, "Hot items"))
-    print(fmt_cold_uplift(cold_uplift))
+    for seg, df in summaries.items():
+        df.to_csv(os.path.join(args.out_dir, f"summary_{seg}.csv"), index=False)
+    for seg, df in baseline_uplift.items():
+        df.to_csv(os.path.join(args.out_dir, f"uplift_vs_baseline_{seg}.csv"), index=False)
+    for seg, df in logq_vs_tuned.items():
+        df.to_csv(os.path.join(args.out_dir, f"logq_vs_tuned_{seg}.csv"), index=False)
 
-    plot_summary(overall, "overall", os.path.join(args.out_dir, "metrics_overall.png"))
-    plot_summary(cold, "cold", os.path.join(args.out_dir, "metrics_cold.png"))
-    plot_summary(warm, "warm", os.path.join(args.out_dir, "metrics_warm.png"))
-    plot_summary(hot, "hot", os.path.join(args.out_dir, "metrics_hot.png"))
-    plot_cold_uplift(cold_uplift, os.path.join(args.out_dir, "cold_uplift.png"))
+    for seg, label in seg_labels:
+        print(fmt_summary_block(summaries[seg], label))
+    for seg, label in seg_labels:
+        print(fmt_baseline_uplift(baseline_uplift[seg], label))
+    for seg, label in seg_labels:
+        print(fmt_pair_uplift(logq_vs_tuned[seg], "tuned, 0.07", "logQ", label))
+
+    for seg in SEGMENTS:
+        plot_summary(summaries[seg], seg, os.path.join(args.out_dir, f"metrics_{seg}.png"))
+        plot_baseline_uplift(
+            baseline_uplift[seg], seg,
+            os.path.join(args.out_dir, f"uplift_vs_baseline_{seg}.png"),
+        )
+        plot_pair_uplift(
+            logq_vs_tuned[seg], "tuned, 0.07", "logQ", seg,
+            os.path.join(args.out_dir, f"logq_vs_tuned_{seg}.png"),
+        )
 
     md_path = os.path.join(args.out_dir, "report.md")
     with open(md_path, "w") as f:
         f.write("# Diploma TensorBoard summary\n\n")
-        f.write(fmt_summary_block(overall, "Overall") + "\n")
-        f.write(fmt_summary_block(cold, "Cold items") + "\n")
-        f.write(fmt_summary_block(warm, "Warm items") + "\n")
-        f.write(fmt_summary_block(hot, "Hot items") + "\n")
-        f.write(fmt_cold_uplift(cold_uplift) + "\n")
+        for seg, label in seg_labels:
+            f.write(fmt_summary_block(summaries[seg], label) + "\n")
+            f.write(f"![{label}](metrics_{seg}.png)\n\n")
+        f.write("## Uplift vs baseline — per segment\n\n")
+        for seg, label in seg_labels:
+            f.write(fmt_baseline_uplift(baseline_uplift[seg], label) + "\n")
+            f.write(f"![Uplift vs baseline — {label}](uplift_vs_baseline_{seg}.png)\n\n")
+        f.write("## logQ vs tuned, 0.07 — uplift per segment\n\n")
+        for seg, label in seg_labels:
+            f.write(fmt_pair_uplift(logq_vs_tuned[seg], "tuned, 0.07", "logQ", label) + "\n")
+            f.write(f"![logQ vs tuned — {label}](logq_vs_tuned_{seg}.png)\n\n")
     print(f"\nReport written to {md_path}")
     print(f"Plots and CSVs in {args.out_dir}/")
 

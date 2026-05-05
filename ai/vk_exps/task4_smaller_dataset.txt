@@ -1,0 +1,32 @@
+Привет!
+
+Можешь изучить task.txt, task2.txt, task3.txt и полученные планы
+
+Проблема в том, что для вк датасета SUBSAMPLE = 'ur0.01_ir0.01' все равно имеет слишком много интеракций
+
+data/VK/inter.json слишком большой (14.3MB)
+
+varka обучается 25 минут
+
+Tiger обучался 6 часов и метрика ndcg@20 все еще продолжала расти, это выходит мне слишком дорого, а эксперименты поставить хочется
+
+https://huggingface.co/datasets/deepvk/VK-LSVD
+
+меньше, чем 'ur0.01_ir0.01' особо нет, только 0.001, но это кажется слишком мало
+
+давай построим план, как сократить по времени пайплайн на вк датасете, может быть брать только последние 15-20 взаимодействий?
+
+но это может быть слишком разреженный датасет..
+
+
+мне бы хотелось тоже час-два крутить эксперимент..
+
+там в описании датасета такие сокращения
+
+urX — X fraction of random users (e.g., ur0.01 = 1% of users).
+ipX — X fraction of popular items (by train_interactions_rank)
+Negative X denotes the least-popular fraction (e.g., −0.9 → bottom 90%).
+For example, to get ur0.01_ip0.01 (1% of random users, 1% of most popular items) use the snippet below.
+
+Давай что-то придумывать, брат
+

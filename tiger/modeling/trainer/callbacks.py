@@ -13,10 +13,12 @@ class MetricCallback:
 
     def __call__(self, key, value, step_num, prefix):
         if step_num % self._on_step == 0:
-            self._tensorboard_writer.add_scalar(
-                f'{prefix}/{key}', value, step_num
-            )
-            self._tensorboard_writer.flush()
+            # Skip logging if value is None (e.g., no samples for this bucket)
+            if value is not None:
+                self._tensorboard_writer.add_scalar(
+                    f'{prefix}/{key}', value, step_num
+                )
+                self._tensorboard_writer.flush()
 
 
 class InferenceCallback:
@@ -64,7 +66,7 @@ class InferenceCallback:
                         ))
 
             for label, value in running_params.items():
-                results[label] = np.mean(value)
+                results[label] = None if len(value) == 0 else float(np.mean(value))
 
             LOGGER.debug(f'Running {self._step_name} on step {step_num} is done!')
 

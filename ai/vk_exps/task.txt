@@ -1,0 +1,54 @@
+Привет!
+
+Я проделал большую работу и настроил эксперименты для Amazon
+
+Тут описал результаты diploma/almanah.md
+
+глобально ядро работы - это
+tiger/cf_finetune.ipynb
+tiger/cf_dataset_builder.ipynb
+notebooks/RQKmeansPipeline.ipynb
+
+взял датасет амазона, получил эмбеды из "huggyllama/llama-7b", см. файл notebooks/DatasetProcessing.ipynb
+эмбеды положились в файл '../data/Beauty/content_embeddings.pkl'
+
+дальше я взял интеракции и построил датасет позитивных пар tiger/cf_dataset_builder.ipynb
+(для амазон датасета взаимодействия хранились тут  "../data/Beauty/inter.json", построенный датасет тут "../data/Beauty/positive_pairs.txt")
+
+дальше я дообучил представление content_embeddings при помощи tiger/cf_finetune.ipynb
+и получил '../data/Beauty/tuned_content_embeddings.pkl'
+
+далее эти эмбеды затюненные я квантизовал при помощи notebooks/RQKmeansPipeline.ipynb
+и получил semantic_index_output_path = '../data/Beauty/tuned_index_rqkmeans.json', 
+которые уже скармливал в seq2seq tiger трансформер tiger/tiger_kmeans_baseline.ipynb,
+см. tiger/configs/tiger_kmeans_train_config.json
+
+по сути для запуска трансформера нужны 2 джсона (взаимодействия и семантические айдишники для квантизации)
+"inter_json_path": "../data/Beauty/inter.json",
+"index_json_path": "../data/Beauty/index_rqkmeans.json",
+
+В итоге получил выигрыш от logQ коррекции и докидывания коллаборативного сигнала
+
+-----------
+
+Проблема в том, что одного амазон датасета крайне недостаточно для дипломной работы,
+поэтому я хочу повторить все то же самое для ВК датасета.
+Из плюсов, VK-LSVD уже имеет готовые эмбеды, их не нужно получать из сырого датасета
+У меня есть уже скачивание датасета в этом файле notebooks/LsvdDownload.ipynb, но я его не запускал еще
+
+Что хочется: 
+- убедиться, что скачивание датасета и интеракций работает, за основу надо взять notebooks/LsvdDownload.ipynb
+(как я помню, у ВК несколько датасетов, супер огромные могут не влезть на A100 машинку)
+положить эмбеды в '../data/Beauty/vk_content_embeddings.pkl'
+а взаимодействия построить в "../data/Beauty/vk_inter.json"
+
+- по аналогии с Амазон построить датасет позитивных пар и положить в "../data/Beauty/vk_positive_pairs.txt"
+
+- обогатить контентные эмбеды коллаборативным сигналом и положить в '../data/Beauty/vk_tuned_content_embeddings.pkl'
+
+- квантизовать их и положить в '../data/Beauty/vk_tuned_index_rqkmeans.json',
+
+tiger должен уметь работать с "../data/Beauty/vk_inter.json" '../data/Beauty/vk_tuned_index_rqkmeans.json'
+код тайгера менять нельзя! это убьет весь смысл эксперимента
+
+Для начала давай построим план решения

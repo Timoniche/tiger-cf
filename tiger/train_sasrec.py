@@ -31,6 +31,10 @@ def main():
     )
     dataset_num_items = dataset.num_items
     dataset_max_sequence_length = dataset.max_sequence_length
+    item_freqs_tensor = torch.tensor(dataset.item_frequencies, dtype=torch.long)
+    cold_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 10)
+    warm_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 100)
+    hot_mask = (item_freqs_tensor >= 5) & (item_freqs_tensor <= 1000)
 
     train_sampler, validation_sampler, test_sampler = dataset.get_samplers()
 
@@ -97,7 +101,28 @@ def main():
         'ndcg@20': NDCGMetric(20),
         'recall@5': RecallMetric(5),
         'recall@10': RecallMetric(10),
-        'recall@20': RecallMetric(20)
+        'recall@20': RecallMetric(20),
+        # Frequency-bucketed metrics (Core-5 dataset, so min_freq=5)
+        'ndcg@5_cold': NDCGMetric(5, allowed_item_mask=cold_mask),
+        'ndcg@10_cold': NDCGMetric(10, allowed_item_mask=cold_mask),
+        'ndcg@20_cold': NDCGMetric(20, allowed_item_mask=cold_mask),
+        'recall@5_cold': RecallMetric(5, allowed_item_mask=cold_mask),
+        'recall@10_cold': RecallMetric(10, allowed_item_mask=cold_mask),
+        'recall@20_cold': RecallMetric(20, allowed_item_mask=cold_mask),
+
+        'ndcg@5_warm': NDCGMetric(5, allowed_item_mask=warm_mask),
+        'ndcg@10_warm': NDCGMetric(10, allowed_item_mask=warm_mask),
+        'ndcg@20_warm': NDCGMetric(20, allowed_item_mask=warm_mask),
+        'recall@5_warm': RecallMetric(5, allowed_item_mask=warm_mask),
+        'recall@10_warm': RecallMetric(10, allowed_item_mask=warm_mask),
+        'recall@20_warm': RecallMetric(20, allowed_item_mask=warm_mask),
+
+        'ndcg@5_hot': NDCGMetric(5, allowed_item_mask=hot_mask),
+        'ndcg@10_hot': NDCGMetric(10, allowed_item_mask=hot_mask),
+        'ndcg@20_hot': NDCGMetric(20, allowed_item_mask=hot_mask),
+        'recall@5_hot': RecallMetric(5, allowed_item_mask=hot_mask),
+        'recall@10_hot': RecallMetric(10, allowed_item_mask=hot_mask),
+        'recall@20_hot': RecallMetric(20, allowed_item_mask=hot_mask),
     }
 
     LOGGER.debug('Everything is ready for training process!')
